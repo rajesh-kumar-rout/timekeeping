@@ -3,31 +3,6 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-function get_boundiary($times, $day)
-{
-    for ($i = 0; $i < count($times); $i++) {
-        if ($times[$i]["day"] == $day) {
-            $prev_index = $i - 1;
-            $prev_time = $times[$prev_index == -1 ? count($times) - 1 : $prev_index];
-
-            $next_index = $i + 1;
-            $next_time = $times[$next_index == count($times) ? 0 : $next_index];
-
-            $start_time = abs(strtotime("2024-01-01 {$prev_time["check_out"]}") - strtotime("2024-01-02 {$times[$i]["check_in"]}"));
-
-            $end_time = abs(strtotime("2024-01-02 {$next_time["check_in"]}") - strtotime("2024-01-01 {$times[$i]["check_out"]}"));
-
-            return [
-                "start_time" => $start_time / 3600,
-                "end_time" => $end_time / 3600,
-                "check_in" => date("H:i", strtotime($times[$i]["check_in"])),
-                "check_out" => date("H:i", strtotime($times[$i]["check_out"]))
-            ];
-        }
-    }
-    return null;
-}
-
 function get_minute_from_hour($hour)
 {
     $hour = strval($hour);
@@ -77,6 +52,25 @@ function die_dump($data)
     die("</pre>");
 }
 
+function get_time_from_sec($sec)
+{
+    $min = intval($sec / 60);
+
+    $hr = intval($min / 60);
+
+    $min = $min % 60;
+
+    if($hr > 0 && $min > 0) {
+        return "$hr hour $min minute";
+    } else if($hr > 0) {
+        return "$hr hour";
+    } else if($min > 0) {
+        return "$min minute";
+    } else {
+        return "NA";
+    }
+}
+
 $db = new PDO("mysql:host=localhost;dbname=timekeeping", "root", "");
 
 $employee_id = 1;
@@ -96,21 +90,34 @@ for ($i = $from; $i <= $to; $i = strtotime(date("Y-m-d H:i:s", $i) . " +1 day"))
             times.check_out, 
             times.lunch_in, 
             times.lunch_out
-        FROM employee_schedule AS es 
-        INNER JOIN schedule_times AS times ON times.schedule_id = es.schedule_id  
+        FROM employee_schedule AS schedule 
+        INNER JOIN schedule_times AS times ON times.schedule_id = schedule.schedule_id  
         WHERE 
-            es.employee_id = $employee_id AND 
-            es.`from` <= '" . date("Y-m-d", $i) . "' AND 
-            es.`to` >= '" . date("Y-m-d", $i) . "' AND
+            schedule.employee_id = $employee_id AND 
+            schedule.`from` <= '" . date("Y-m-d", $i) . "' AND 
+            schedule.`to` >= '" . date("Y-m-d", $i) . "' AND
             times.day = " . date("N", $i) . "  
         LIMIT 1
     ");
 
+    // returning with empty data if no scedule is found for current data
     if ($current_time == null) {
         $data[] = [
             "date" => date("Y-m-d", $i),
             "holiday" => true,
-            "punches" => []
+            "lb" => "",
+            "up" => "",
+            "actual_in" => "",
+            "actual_out" => "",
+            "punches" => [],
+            "office_time" => "",
+            "total_break" => "",
+            "working_hour" => "",
+            "mispunch" => "",
+            "punctuality" => [
+                "in" => "",
+                "out" => ""
+            ]
         ];
         continue;
     }
@@ -122,12 +129,12 @@ for ($i = $from; $i <= $to; $i = strtotime(date("Y-m-d H:i:s", $i) . " +1 day"))
             times.check_out, 
             times.lunch_in, 
             times.lunch_out
-        FROM employee_schedule AS es 
-        INNER JOIN schedule_times AS times ON times.schedule_id = es.schedule_id  
+        FROM employee_schedule AS schedule 
+        INNER JOIN schedule_times AS times ON times.schedule_id = schedule.schedule_id  
         WHERE 
-            es.employee_id = $employee_id AND 
-            es.`from` <= '" . date("Y-m-d", strtotime(date("Y-m-d", $i) . " -1 day")) . "' AND 
-            es.`to` >= '" . date("Y-m-d", strtotime(date("Y-m-d", $i) . " -1 day")) . "' AND
+            schedule.employee_id = $employee_id AND 
+            schedule.`from` <= '" . date("Y-m-d", strtotime(date("Y-m-d", $i) . " -1 day")) . "' AND 
+            schedule.`to` >= '" . date("Y-m-d", strtotime(date("Y-m-d", $i) . " -1 day")) . "' AND
             times.day = " . date("N", strtotime(date("Y-m-d", $i) . " -1 day")) . "  
         LIMIT 1
     ");
@@ -139,150 +146,228 @@ for ($i = $from; $i <= $to; $i = strtotime(date("Y-m-d H:i:s", $i) . " +1 day"))
             times.check_out, 
             times.lunch_in, 
             times.lunch_out
-        FROM employee_schedule AS es 
-        INNER JOIN schedule_times AS times ON times.schedule_id = es.schedule_id  
+        FROM employee_schedule AS schedule 
+        INNER JOIN schedule_times AS times ON times.schedule_id = schedule.schedule_id  
         WHERE 
-            es.employee_id = $employee_id AND 
-            es.`from` <= '" . date("Y-m-d", strtotime(date("Y-m-d", $i) . " +1 day")) . "' AND 
-            es.`to` >= '" . date("Y-m-d", strtotime(date("Y-m-d", $i) . " +1 day")) . "' AND
+            schedule.employee_id = $employee_id AND 
+            schedule.`from` <= '" . date("Y-m-d", strtotime(date("Y-m-d", $i) . " +1 day")) . "' AND 
+            schedule.`to` >= '" . date("Y-m-d", strtotime(date("Y-m-d", $i) . " +1 day")) . "' AND
             times.day = " . date("N", strtotime(date("Y-m-d", $i) . " +1 day")) . "  
         LIMIT 1
     ");
 
+    // calculating lower bound
     if ($prev_time == null) {
-        $lb = date("Y-m-d", $i) . " " . date("H:i", strtotime($current_time["check_in"]));
+        $actual_in = date("Y-m-d", $i) . " " . date("H:i", strtotime($current_time["check_in"]));
 
-        $actual_in = date("Y-m-d H:i", strtotime("$lb"));
-
-        $lb = date("Y-m-d H:i", strtotime("$lb -420 minute"));
+        $lb = date("Y-m-d H:i", strtotime("$actual_in -420 minute"));
     } else {
         if (strtotime($prev_time["check_out"]) >= strtotime($current_time["check_in"])) {
-            $ct = abs(strtotime("2024-01-02 " . date("H:i", strtotime($current_time["check_in"]))) -
+            $gap = abs(strtotime("2024-01-02 " . date("H:i", strtotime($current_time["check_in"]))) -
                 strtotime("2024-01-01 " . date("H:i", strtotime($prev_time["check_out"])))) / 3600;
-            $ct = get_minute_from_hour($ct / 2);
+            $gap = get_minute_from_hour($gap / 2);
         } else {
-            $ct = abs(strtotime("2024-01-01 " . date("H:i", strtotime($current_time["check_in"]))) -
+            $gap = abs(strtotime("2024-01-01 " . date("H:i", strtotime($current_time["check_in"]))) -
                 strtotime("2024-01-01 " . date("H:i", strtotime($prev_time["check_out"])))) / 3600;
-            $ct = get_minute_from_hour($ct / 2);
+            $gap = get_minute_from_hour($gap / 2);
         }
 
-        $lb = date("Y-m-d", $i) . " " . date("H:i", strtotime($current_time["check_in"]));
+        $actual_in = date("Y-m-d", $i) . " " . date("H:i", strtotime($current_time["check_in"]));
 
-        $actual_in = date("Y-m-d H:i", strtotime("$lb"));
-
-        $lb = date("Y-m-d H:i", strtotime("$lb -$ct minute"));
+        $lb = date("Y-m-d H:i", strtotime("$actual_in -$gap minute"));
     }
 
+    // calculating upper bound
     if ($next_time == null) {
-        $ub = date("Y-m-d", $i) . " " . date("H:i", strtotime($current_time["check_out"]));
+        $actual_out = date("Y-m-d", $i) . " " . date("H:i", strtotime($current_time["check_out"]));
 
-        $actual_out = date("Y-m-d H:i", strtotime("$ct"));
-
-        $ub = date("Y-m-d H:i", strtotime("$ct +420 minute"));
+        $ub = date("Y-m-d H:i", strtotime("$actual_out +420 minute"));
     } else {
         if (strtotime($next_time["check_in"]) <= strtotime($current_time["check_out"])) {
-            $ct = abs(strtotime("2024-01-01 " . date("H:i", strtotime($current_time["check_out"]))) -
+            $gap = abs(strtotime("2024-01-01 " . date("H:i", strtotime($current_time["check_out"]))) -
                 strtotime("2024-01-02 " . date("H:i", strtotime($next_time["check_in"])))) / 3600;
 
-            $ct = get_minute_from_hour($ct / 2) - 1;
+            $gap = get_minute_from_hour($gap / 2) - 1;
         } else {
-            $ct = abs(strtotime("2024-01-01 " . date("H:i", strtotime($current_time["check_out"]))) -
+            $gap = abs(strtotime("2024-01-01 " . date("H:i", strtotime($current_time["check_out"]))) -
                 strtotime("2024-01-01 " . date("H:i", strtotime($next_time["check_in"])))) / 3600;
 
-            $ct = get_minute_from_hour($ct / 2) - 1;
+            $gap = get_minute_from_hour($gap / 2) - 1;
         }
 
         if (strtotime($current_time["check_in"]) >= strtotime($current_time["check_out"])) {
-            $sm = date("Y-m-d", strtotime(date("Y-m-d", $i) . " +1 day"));
+            $checkout_date = date("Y-m-d", strtotime(date("Y-m-d", $i) . " +1 day"));
         } else {
-            $sm = date("Y-m-d", $i);
+            $checkout_date = date("Y-m-d", $i);
         }
 
-        $ub = $sm . " " . date("H:i", strtotime($current_time["check_out"]));
+        $actual_out = $checkout_date . " " . date("H:i", strtotime($current_time["check_out"]));
 
-        $actual_out = date("Y-m-d H:i", strtotime("$ub"));
-
-        $ub = date("Y-m-d H:i", strtotime("$ub +$ct minute"));
+        $ub = date("Y-m-d H:i", strtotime("$actual_out +$gap minute"));
     }
 
+    // retriving punches from db
     $punches = find_all("SELECT * FROM punches WHERE employee_id = $employee_id AND `timestamp` >= '$lb' AND `timestamp` < '$ub'");
 
-    $item = [
+    // returning with empty data if no punches found
+    if (empty($punches)) {
+        $data[] = [
+            "date" => date("Y-m-d", $i),
+            "holiday" => false,
+            "lb" => $lb,
+            "up" => $ub,
+            "actual_in" => $actual_in,
+            "actual_out" => $actual_out,
+            "punches" => [],
+            "office_time" => "",
+            "total_break" => "",
+            "working_hour" => "",
+            "mispunch" => "",
+            "punctuality" => [
+                "in" => "",
+                "out" => ""
+            ]
+        ];
+        continue;
+    }
+
+    // formatting punches array
+    $punches = array_map(fn($value) => [
+        "time" => date("Y-m-d h:i A", strtotime($value["timestamp"])),
+        "type" => $value["type"]
+    ], $punches);
+
+    // calculating in punctuality
+    if (strtotime($punches[0]["time"]) >= strtotime($actual_in . " +15 minute")) {
+        $in_punctuality = "LATE";
+    } else if (strtotime($punches[0]["time"]) <= strtotime($actual_in . " -15 minute")) {
+        $in_punctuality = "EARLY";
+    } else {
+        $in_punctuality = "IN-TIME";
+    }
+
+    // calculating out punctuality
+    $last_punch = $punches[count($punches) - 1];
+
+    if ($last_punch["type"] === "OUT") {
+        if (strtotime($last_punch["time"]) >= strtotime($actual_out . " +15 minute")) {
+            $out_punctuality = "LATE";
+        } else if (strtotime($last_punch["time"]) <= strtotime($actual_out . " -15 minute")) {
+            $out_punctuality = "EARLY";
+        } else {
+            $out_punctuality = "IN-TIME";
+        }
+    } else {
+        $out_punctuality = "NA";
+    }
+
+    if ($last_punch["type"] === "OUT") {
+        $office_time = strtotime($last_punch["time"]) - strtotime($punches[0]["time"]);
+    } else {
+        $office_time = 0;
+    }
+
+    // calculating mispunch and total break
+    $total_break = 0;
+    $mispunch = false;
+
+    for ($x = 0; $x < count($punches) - 1; $x++) {
+        if ($punches[$x]["type"] === "OUT" && $punches[$x + 1]["type"] === "IN") {
+            $total_break += (strtotime($punches[$x + 1]["time"]) - strtotime($punches[$x]["time"]));
+        }
+        if ($punches[$x]["type"] === $punches[$x + 1]["type"]) {
+            $mispunch = true;
+        }
+    }
+
+    // calculating total working hour
+    $working_hour = $office_time - $total_break;
+
+    // calculating mispunch
+    if ($last_punch["type"] !== "OUT" && strtotime(date("Y-m-d H:i")) >= strtotime($ub)) {
+        $mispunch = true;
+    }
+
+    $data[] = [
         "date" => date("Y-m-d", $i),
-        "check_in" => date("h:i A", strtotime($current_time["check_in"])),
-        "check_out" => date("h:i A", strtotime($current_time["check_out"])),
+        "lb" => $lb,
+        "up" => $ub,
+        "actual_in" => $actual_in,
+        "actual_out" => $actual_out,
         "holiday" => false,
-        "punches" => array_map(fn($value) => [
-            "time" => date("Y-m-d h:i A", strtotime($value["timestamp"])),
-            "type" => $value["type"]
-        ], $punches),
-        "punctuality" => []
+        "punches" => $punches,
+        "office_time" => get_time_from_sec($office_time),
+        "total_break" => get_time_from_sec($total_break),
+        "working_hour" => get_time_from_sec($working_hour),
+        "mispunch" => $mispunch,
+        "punctuality" => [
+            "in" => $in_punctuality,
+            "out" => $out_punctuality
+        ]
     ];
-
-    $time = strtotime($item["date"] . " " . $item["check_in"]);
-
-    if (strtotime($current_time["check_in"]) >= strtotime($current_time["check_out"])) {
-        $timeout = strtotime(date("Y-m-d", strtotime(date("Y-m-d", $i) . " +1 day")) . " " . $item["check_out"]);
-    } else {
-        $timeout = strtotime($item["date"] . " " . $item["check_out"]);
-    }
-
-    $item["punctuality"]["in"] = empty($item["punches"]) ? "" : ($time == strtotime($item["punches"][0]["time"]) ? "IN_TIME" : ($time > strtotime($item["punches"][0]["time"]) ? "EARLY" : "LATE"));
-
-    $item["punctuality"]["out"] = empty($item["punches"]) ? "" : ($item["punches"][count($item["punches"]) - 1]["type"] == "IN" ? "" : ($timeout == strtotime($item["punches"][count($item["punches"]) - 1]["time"]) ? "IN_TIME" : ($timeout > strtotime($item["punches"][count($item["punches"]) - 1]["time"]) ? "EARLY" : "LATE")));
-
-    if (!empty($item["punches"])) {
-        if ($item["punches"][count($item["punches"]) - 1]["type"] !== "OUT" || count($item["punches"]) === 1) {
-            $item["time_in_office"] = "";
-        } else {
-            $item["time_in_office"] = (strtotime($item["punches"][count($item["punches"]) - 1]["time"]) - strtotime($item["punches"][0]["time"])) / 60;
-
-            if ($item["time_in_office"] % 60 !== 0) {
-                $item["time_in_office"] = (intval($item["time_in_office"] / 60)) . " hr" . " " . ($item["time_in_office"] % 60) . " min";
-            } else {
-                $item["time_in_office"] = intval($item["time_in_office"] / 60) . " hr";
-            }
-        }
-    } else {
-        $item["time_in_office"] = "";
-    }
-
-    $item["ub"] = $ub;
-    $item["lb"] = $lb;
-    $item["actual_in"] = $actual_in;
-    $item["actual_out"] = $actual_out;
-
-    if (!empty($item["punches"])) {
-        if (
-            $item["punches"][count($item["punches"]) - 1]["type"] !== "OUT" && strtotime(date("Y-m-d H:i")) >=
-            strtotime($ub)
-        ) {
-            $item["mispunch"] = true;
-        } else {
-            $item["mispunch"] = false;
-        }
-
-        $total = 0;
-
-        for ($x = 0; $x < count($item["punches"]) - 1; $x++) {
-            if ($item["punches"][$x]["type"] === "OUT" && $item["punches"][$x + 1]["type"] === "IN") {
-                $total += (strtotime($item["punches"][$x + 1]["time"]) - strtotime($item["punches"][$x]["time"]));
-            }
-        }
-
-        $tm = $total / 60;
-
-        if ($tm % 60 !== 0) {
-            $item["total_working_hour"] = intval($tm / 60) . " hr " . ($tm % 60) . " min";
-        } else {
-            $item["total_working_hour"] = intval($tm / 60) . " hr ";
-        }
-    } else {
-        $item["total_working_hour"] = "";
-    }
-
-
-    $data[] = $item;
 }
 
-die_dump($data);
+// die_dump($data);
+
+?>
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bootstrap demo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+</head>
+
+<body>
+    <div class="container">
+        <table class="table table-bordered">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Actual In</th>
+                    <th>Actual Out</th>
+                    <th>Check In</th>
+                    <th>Check Out</th>
+                    <th>Office Time</th>
+                    <th>Total Break</th>
+                    <th>Working Hour</th>
+                    <th>Mispunch</th>
+                    <th>In Punctuality</th>
+                    <th>Out Punctuality</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($data as $item): ?>
+                    <tr>
+                        <td><?= date("Y-m-d", strtotime($item["date"])) ?></td>
+                        <?php if (!empty($item["punches"])): ?>
+                            <td><?= date("h:i A", strtotime($item["actual_in"])) ?></td>
+                            <td><?= date("h:i A", strtotime($item["actual_out"])) ?></td>
+                            <td><?= date("h:i A", strtotime($item["punches"][0]["time"])) ?? null ?></td>
+                            <td><?= $item["punches"][count($item["punches"]) - 1]["type"] === "OUT" ? 
+                            date("h:i A", strtotime($item["punches"][count($item["punches"]) - 1]["time"])) : "NA" ?>
+                            </td>
+                            <td><?= $item["office_time"] ?></td>
+                            <td><?= $item["total_break"] ?></td>
+                            <td><?= $item["working_hour"] ?></td>
+                            <td><?= $item["mispunch"] ? "Yes" : "No" ?></td>
+                            <td><?= $item["punctuality"]["in"] ?></td>
+                            <td><?= $item["punctuality"]["out"] ?></td>
+                        <?php else: ?>
+                            <td colspan="10"></td>
+                        <?php endif ?>
+                    </tr>
+                <?php endforeach ?>
+            </tbody>
+        </table>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
+</body>
+
+</html>
